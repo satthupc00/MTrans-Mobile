@@ -75,6 +75,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         private set
     private var camJob: Job? = null
 
+    /** List mode: the blocks the user picked (by dragging a region or tapping boxes). */
+    var picked by mutableStateOf<Set<Int>>(emptySet())
+        private set
+    /** Translation of the picked blocks, read together as one passage. */
+    var pickResult by mutableStateOf<CamItem?>(null)
+        private set
+    var pickEngine by mutableStateOf<Engine?>(null)
+        private set
+    var pickBusy by mutableStateOf(false)
+        private set
+    /** List mode shows every block (after "Dịch tất cả"). */
+    var showAll by mutableStateOf(false)
+        private set
+    private var pickJob: Job? = null
+
     // ---------- settings ----------
     var alwaysOffline by mutableStateOf(prefs.alwaysOffline)
         private set
@@ -230,49 +245,68 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         selected = -1
         camError = null
         camEngine = null
+        clearPick()
+        showAll = false
         camJob?.cancel()
-        camJob = viewModelScope.launch { readAndTranslate() }
+        camJob = viewModelScope.launch { readImage() }
     }
 
     fun retake() {
         camJob?.cancel()
+        pickJob?.cancel()
         photo = null
         items = emptyList()
         detected = null
         camError = null
         camBusy = false
+        clearPick()
+        showAll = false
     }
 
     fun setOverlayMode(on: Boolean) {
         overlay = on
         prefs.overlayMode = on
+        // Drawing over the photo needs every block translated.
+        if (on && items.any { it.translated == null && !it.failed }) translateAll()
     }
 
     fun pickCamTarget(l: Lang) {
         if (l == detected || l == camTarget) return
         camTarget = l
-        camJob?.cancel()
-        camJob = viewModelScope.launch { translateItems() }
+        items = items.map { it.copy(translated = null, failed = false) }
+        camEngine = null
+        if (overlay || showAll) translateAll()
+        if (picked.isNotEmpty()) translatePick(Engine.GOOGLE)
     }
 
-    private suspend fun readAndTranslate() {
+    private suspend fun readImage() {
         val p = photo ?: return
         camBusy = true
         try {
             val r = Ocr.read(p)
             if (r.blocks.isEmpty()) {
-                camError = "Không thấy chữ trong ảnh"
+                camError = "Không thấy chữ trong ảnh. Thử \"Dịch với Claude\" nếu chữ khó đọc."
                 return
             }
             detected = r.lang
             camTarget = Lang.defaultTarget(r.lang)
             items = r.blocks.map { CamItem(it.text, it.box) }
-            translateItems()
         } catch (e: Exception) {
             camError = e.message ?: "Không đọc được ảnh"
+            return
         } finally {
             camBusy = false
         }
+        // List mode waits for the user to pick a region; overlay mode needs everything.
+        if (overlay) translateItems()
+    }
+
+    /** "Dịch tất cả": translate every block and list them. */
+    fun translateAll() {
+        clearPick()
+        showAll = true
+        camJob?.cancel()
+        camJob = viewModelScope.launch { translateItems() }
     }
 
     private suspend fun translateItems() {
@@ -281,7 +315,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         camBusy = true
         camError = null
         val gate = Semaphore(4)
-        val jobs = items.indices.map { i ->
+        val jobs = items.indices.filter { items[it].translated == null }.map { i ->
             viewModelScope.launch {
                 gate.withPermit {
                     try {
@@ -302,20 +336,101 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         camBusy = false
     }
 
-    fun claudeImage() {
+    // ---------- list mode: pick a region ----------
+
+    /** Blocks touched by a dragged rectangle (image coordinates) become the selection. */
+    fun pickRegion(region: Rect) {
+        val hit = items.indices.filter { i -> items[i].box?.let { Rect.intersects(it, region) } == true }.toSet()
+        if (hit.isEmpty()) return
+        picked = hit
+        showAll = false
+        translatePick(Engine.GOOGLE)
+    }
+
+    /** Tapping a box adds it to / removes it from the selection. */
+    fun toggleBlock(i: Int) {
+        picked = if (i in picked) picked - i else picked + i
+        showAll = false
+        if (picked.isEmpty()) clearPick() else translatePick(Engine.GOOGLE, debounce = true)
+    }
+
+    fun clearPick() {
+        pickJob?.cancel()
+        picked = emptySet()
+        pickResult = null
+        pickEngine = null
+        pickBusy = false
+    }
+
+    /** The picked blocks in reading order, joined into one passage. */
+    private fun pickedText(): String {
+        val sep = if (detected == Lang.ZH) "" else " "
+        return picked.mapNotNull { items.getOrNull(it) }
+            .sortedWith(compareBy({ (it.box?.top ?: 0) / 24 }, { it.box?.left ?: 0 }))
+            .joinToString(sep) { it.original }
+    }
+
+    private fun translatePick(engine: Engine, debounce: Boolean = false) {
+        val src = detected ?: return
+        val text = pickedText()
+        if (text.isBlank()) return
+        pickJob?.cancel()
+        pickJob = viewModelScope.launch {
+            if (debounce) delay(350)
+            pickBusy = true
+            camError = null
+            try {
+                if (engine == Engine.CLAUDE) {
+                    val t = ClaudeService.translateText(prefs.apiKey, model, text, src, camTarget)
+                    pickResult = CamItem(text, null, t)
+                    pickEngine = Engine.CLAUDE
+                } else {
+                    val (t, e) = smart(text, src, camTarget)
+                    pickResult = CamItem(text, null, t)
+                    pickEngine = e
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                camError = e.message
+            } finally {
+                pickBusy = false
+            }
+        }
+    }
+
+    // ---------- Claude ----------
+
+    /** "Dịch với Claude" on the camera screen: the picked region, or every block (keeps their places
+     *  so the overlay still works), or the whole photo when OCR found nothing. */
+    fun claudeCamera() {
         val key = prefs.apiKey
         val p = photo ?: return
         if (key.isEmpty()) return
+        if (!overlay && picked.isNotEmpty()) {
+            translatePick(Engine.CLAUDE)
+            return
+        }
         camJob?.cancel()
         camJob = viewModelScope.launch {
             camBusy = true
             camError = null
             try {
-                val (orig, tr) = ClaudeService.translateImage(key, model, p, camTarget)
-                items = listOf(CamItem(orig, null, tr))
-                selected = -1
+                if (items.isEmpty()) {
+                    val (orig, tr) = ClaudeService.translateImage(key, model, p, camTarget)
+                    items = listOf(CamItem(orig, null, tr))
+                    detected = detected ?: Ocr.detect(orig)
+                    showAll = true
+                    setOverlayMode(false)
+                } else {
+                    val out = ClaudeService.translateBlocks(key, model, p, items.map { it.original }, camTarget)
+                    items = items.mapIndexed { i, it ->
+                        val t = out.getOrNull(i)
+                        if (t.isNullOrBlank()) it else it.copy(translated = t, failed = false)
+                    }
+                    if (!overlay) showAll = true
+                }
                 camEngine = Engine.CLAUDE
-                setOverlayMode(false)
             } catch (e: Exception) {
                 camError = e.message
             } finally {

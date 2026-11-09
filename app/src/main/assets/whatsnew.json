@@ -1,15 +1,13 @@
 {
-  "version": "1.0.0",
-  "date": "2026-11-09",
+  "version": "1.0.1",
+  "date": "2026-11-10",
   "new": [
-    "Dịch văn bản giữa Tiếng Việt, Tiếng Anh và Tiếng Trung, gõ xong là tự dịch",
-    "Chụp ảnh hoặc chọn ảnh có sẵn: tự nhận ra ngôn ngữ và dịch sang Tiếng Việt",
-    "Xem bản dịch dạng danh sách hoặc đè thẳng lên ảnh",
-    "Dịch offline khi mất mạng (tải gói ngôn ngữ trong Cài đặt)",
-    "Nút \"Dịch với Claude\" cho bản dịch tự nhiên hơn (cần API key)",
-    "Màn hình trong Z Fold 7: ảnh và bản dịch chia đôi màn hình",
-    "Tự kiểm tra và cài bản mới"
+    "Kiểu Danh sách: kéo ngón tay trên ảnh để khoanh vùng chữ cần dịch, hoặc chạm từng khung để chọn / bỏ chọn",
+    "Các đoạn đã chọn được dịch chung thành 1 đoạn liền mạch; vẫn có nút \"Dịch tất cả\"",
+    "Kiểu Đè lên ảnh có nút \"Dịch với Claude\": Claude dịch từng đoạn và đè đúng chỗ chữ gốc"
   ],
-  "improved": [],
+  "improved": [
+    "Claude nhìn cả ảnh để sửa chữ máy đọc sai trước khi dịch"
+  ],
   "fixed": []
 }

@@ -116,6 +116,39 @@ object ClaudeService {
         return if (i < 0) "" to out else out.substring(0, i).trim() to out.substring(i).removePrefix("\n").trimStart('-').trim()
     }
 
+    /** Translate each OCR block separately (keeps their positions for the overlay).
+     *  The photo is sent too so Claude can fix OCR mistakes. Returns one translation per block. */
+    suspend fun translateBlocks(key: String, model: String, bitmap: Bitmap, blocks: List<String>, to: Lang): List<String?> {
+        val jpeg = withContext(Dispatchers.Default) {
+            val scaled = scaleDown(bitmap, 1600)
+            val out = ByteArrayOutputStream()
+            scaled.compress(Bitmap.CompressFormat.JPEG, 85, out)
+            Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+        }
+        val system = "Bạn dịch chữ trong ảnh chụp sang ${to.label}. $CONTEXT\n" +
+            "Người dùng gửi ảnh và danh sách ${blocks.size} đoạn chữ máy đã đọc từ ảnh (có thể sai chính tả, hãy nhìn ảnh để hiểu đúng). " +
+            "Dịch từng đoạn sang ${to.label}, ngắn gọn để vừa chỗ chữ gốc trên ảnh. " +
+            "Trả lời đúng ${blocks.size} dòng theo thứ tự, mỗi dòng dạng `số. bản dịch`, không gộp hay tách đoạn, không thêm gì khác."
+        val list = blocks.mapIndexed { i, b -> "${i + 1}. ${b.replace('\n', ' ')}" }.joinToString("\n")
+        val content = MessageContentParam.ofContentBlockParams(
+            listOf(
+                ContentBlockParam.ofImage(
+                    Base64ImageSource.builder().data(jpeg).mediaType(Base64ImageSource.MediaType.IMAGE_JPEG).build()
+                ),
+                ContentBlockParam.ofText("Các đoạn:\n$list"),
+            )
+        )
+        val out = send(key, base(model, system, 4000).addUserMessage(content).build())
+        val result = arrayOfNulls<String>(blocks.size)
+        val re = Regex("""^\s*(\d+)[.)]\s*(.*)$""")
+        out.lines().forEach { line ->
+            val m = re.find(line) ?: return@forEach
+            val n = m.groupValues[1].toInt() - 1
+            if (n in result.indices) result[n] = m.groupValues[2].trim()
+        }
+        return result.toList()
+    }
+
     /** Check a key without spending credits (listing models is free). */
     suspend fun testKey(key: String) {
         withContext(Dispatchers.IO) {

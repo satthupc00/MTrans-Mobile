@@ -23,7 +23,13 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.geometry.Offset
+import android.graphics.Rect
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -233,7 +239,9 @@ private fun RoundIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, lab
 
 @Composable
 private fun PhotoView(vm: AppViewModel, photo: Bitmap, showToggle: Boolean) {
-    var peek by remember { mutableStateOf(false) } // holding a finger shows the original text
+    var peek by remember { mutableStateOf(false) } // overlay: holding a finger shows the original text
+    var dragFrom by remember { mutableStateOf<Offset?>(null) }
+    var dragTo by remember { mutableStateOf<Offset?>(null) }
     val density = LocalDensity.current
     BoxWithConstraints(Modifier.fillMaxSize().background(Color(0xFF0D0E10))) {
         val w = constraints.maxWidth.toFloat()
@@ -241,14 +249,50 @@ private fun PhotoView(vm: AppViewModel, photo: Bitmap, showToggle: Boolean) {
         val s = minOf(w / photo.width, h / photo.height)
         val dx = (w - photo.width * s) / 2f
         val dy = (h - photo.height * s) / 2f
+        fun toImage(o: Offset) = Offset((o.x - dx) / s, (o.y - dy) / s)
         val image = remember(photo) { photo.asImageBitmap() }
+        val overlay = vm.overlay
         Image(
             image, contentDescription = null, contentScale = ContentScale.Fit,
-            modifier = Modifier.fillMaxSize().then(
-                if (vm.overlay) Modifier.pointerInput(Unit) {
-                    detectTapGestures(onPress = { peek = true; tryAwaitRelease(); peek = false })
-                } else Modifier,
-            ),
+            modifier = Modifier.fillMaxSize()
+                .pointerInput(overlay, vm.items) {
+                    if (overlay) {
+                        detectTapGestures(onPress = { peek = true; tryAwaitRelease(); peek = false })
+                    } else {
+                        // Tap a box to add/remove it from the selection.
+                        detectTapGestures { pos ->
+                            val p = toImage(pos)
+                            val i = vm.items.indexOfFirst { it.box?.contains(p.x.toInt(), p.y.toInt()) == true }
+                            if (i >= 0) vm.toggleBlock(i)
+                        }
+                    }
+                }
+                .pointerInput(overlay, vm.items) {
+                    if (!overlay) {
+                        // Drag to draw a selection rectangle over the text to translate.
+                        detectDragGestures(
+                            onDragStart = { dragFrom = it; dragTo = it },
+                            onDrag = { change, amount -> change.consume(); dragTo = (dragTo ?: change.position) + amount },
+                            onDragEnd = {
+                                val a = dragFrom
+                                val b = dragTo
+                                if (a != null && b != null) {
+                                    val p1 = toImage(a)
+                                    val p2 = toImage(b)
+                                    vm.pickRegion(
+                                        Rect(
+                                            minOf(p1.x, p2.x).toInt(), minOf(p1.y, p2.y).toInt(),
+                                            maxOf(p1.x, p2.x).toInt(), maxOf(p1.y, p2.y).toInt(),
+                                        )
+                                    )
+                                }
+                                dragFrom = null
+                                dragTo = null
+                            },
+                            onDragCancel = { dragFrom = null; dragTo = null },
+                        )
+                    }
+                },
         )
         vm.items.forEachIndexed { i, item ->
             val box = item.box ?: return@forEachIndexed
@@ -257,7 +301,7 @@ private fun PhotoView(vm: AppViewModel, photo: Bitmap, showToggle: Boolean) {
             val bw = with(density) { (box.width() * s).toDp() }
             val bh = with(density) { (box.height() * s).toDp() }
             val pos = Modifier.offset { IntOffset(x.toInt(), y.toInt()) }.size(bw, bh)
-            if (vm.overlay && !peek) {
+            if (overlay && !peek) {
                 val tr = item.translated
                 if (tr != null) {
                     val lines = (tr.length / 18 + 1).coerceAtMost(6)
@@ -269,14 +313,26 @@ private fun PhotoView(vm: AppViewModel, photo: Bitmap, showToggle: Boolean) {
                         Text(tr, color = Color(0xFF1A1A1A), fontSize = fs.sp, lineHeight = (fs * 1.2f).sp, fontWeight = FontWeight.SemiBold, overflow = TextOverflow.Ellipsis)
                     }
                 }
-            } else if (!vm.overlay) {
-                val sel = i == vm.selected
+            } else if (!overlay) {
+                val on = i in vm.picked || (vm.showAll && i == vm.selected)
                 Box(
-                    pos.border(2.dp, C.Red, RoundedCornerShape(5.dp))
-                        .background(C.Red.copy(alpha = if (sel) .22f else .07f), RoundedCornerShape(5.dp))
-                        .clickable { vm.selected = i },
+                    pos.border(if (on) 2.dp else 1.5.dp, C.Red.copy(alpha = if (on) 1f else .6f), RoundedCornerShape(5.dp))
+                        .background(C.Red.copy(alpha = if (on) .24f else .05f), RoundedCornerShape(5.dp)),
                 )
             }
+        }
+        // Rectangle being dragged
+        val a = dragFrom
+        val b = dragTo
+        if (a != null && b != null) {
+            val left = minOf(a.x, b.x)
+            val top = minOf(a.y, b.y)
+            Box(
+                Modifier.offset { IntOffset(left.toInt(), top.toInt()) }
+                    .size(with(density) { kotlin.math.abs(b.x - a.x).toDp() }, with(density) { kotlin.math.abs(b.y - a.y).toDp() })
+                    .border(2.dp, C.Red, RoundedCornerShape(3.dp))
+                    .background(C.Red.copy(alpha = .15f)),
+            )
         }
         DetectChip(vm, Modifier.align(Alignment.TopStart).padding(10.dp))
         IconButton(
@@ -295,15 +351,41 @@ private fun PhotoView(vm: AppViewModel, photo: Bitmap, showToggle: Boolean) {
             }
         }
         if (showToggle) {
-            Segmented(
-                listOf("Danh sách", "Đè lên ảnh"), if (vm.overlay) 1 else 0, { vm.setOverlayMode(it == 1) },
-                Modifier.align(Alignment.BottomCenter).padding(bottom = 18.dp).fillMaxWidth(0.8f),
-            )
+            Column(
+                Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp).fillMaxWidth(0.86f),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // Overlay mode: who translated + the Claude button
+                Row(
+                    Modifier.clip(RoundedCornerShape(20.dp)).background(C.Chrome.copy(alpha = .9f)).padding(start = 10.dp, end = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    EngineChip(vm.camEngine)
+                    if (vm.camEngine == Engine.CLAUDE) {
+                        Text("  Bản dịch của Claude", color = C.Muted, fontSize = 12.sp, modifier = Modifier.padding(end = 10.dp, top = 8.dp, bottom = 8.dp))
+                    } else {
+                        ClaudeButton(vm)
+                    }
+                }
+                val err = vm.camError
+                if (err != null) {
+                    Text(err, color = C.Warn, fontSize = 12.sp, modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(C.Chrome.copy(alpha = .9f)).padding(horizontal = 10.dp, vertical = 4.dp))
+                }
+                Segmented(listOf("Danh sách", "Đè lên ảnh"), 1, { vm.setOverlayMode(it == 1) }, Modifier.fillMaxWidth())
+            }
         }
     }
 }
 
-/** "Đã nhận ra: Tiếng Trung → Tiếng Việt"; tap the target to switch it. */
+@Composable
+private fun ClaudeButton(vm: AppViewModel, label: String = "Dịch với Claude") {
+    if (vm.alwaysOffline || vm.photo == null) return
+    TextButton(onClick = {
+        if (vm.hasKey) vm.claudeCamera() else vm.updateMsg = "Nhập API key trong Cài đặt để dịch với Claude"
+    }) { Text(label, color = C.RedSoft, fontWeight = FontWeight.SemiBold, fontSize = 13.sp) }
+}
+
 @Composable
 private fun DetectChip(vm: AppViewModel, modifier: Modifier) {
     val d = vm.detected ?: return
@@ -324,38 +406,87 @@ private fun DetectChip(vm: AppViewModel, modifier: Modifier) {
 @Composable
 private fun ResultList(vm: AppViewModel, modifier: Modifier) {
     val list = rememberLazyListState()
-    LaunchedEffect(vm.selected) { if (vm.selected >= 0) list.animateScrollToItem(vm.selected) }
+    LaunchedEffect(vm.selected) { if (vm.selected >= 0 && vm.showAll) list.animateScrollToItem(vm.selected) }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Segmented(listOf("Danh sách", "Đè lên ảnh"), if (vm.overlay) 1 else 0, { vm.setOverlayMode(it == 1) }, Modifier.fillMaxWidth())
         val err = vm.camError
         if (err != null) Text(err, color = C.Warn, fontSize = 13.sp)
-        LazyColumn(Modifier.weight(1f), state = list, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            itemsIndexed(vm.items) { i, item ->
-                val sel = i == vm.selected
+        val pick = vm.pickResult
+        when {
+            vm.picked.isNotEmpty() -> {
+                // The picked region, translated as one passage
                 Column(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                        .background(if (sel) C.SelectedBg else C.Panel)
-                        .border(1.dp, if (sel) C.Red else C.Line, RoundedCornerShape(12.dp))
-                        .clickable { vm.selected = if (sel) -1 else i }
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(C.SelectedBg)
+                        .border(1.dp, C.Red, RoundedCornerShape(12.dp)).padding(horizontal = 12.dp, vertical = 10.dp)
+                        .verticalScroll(rememberScrollState()),
                 ) {
-                    Text(item.original, color = C.Muted, fontSize = 12.5.sp, maxLines = if (sel) 20 else 3, overflow = TextOverflow.Ellipsis)
-                    Spacer(Modifier.height(2.dp))
+                    Text("Vùng đã chọn · ${vm.picked.size} đoạn", color = C.Muted, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(4.dp))
+                    Text(pick?.original ?: "", color = C.Muted, fontSize = 13.sp)
+                    Spacer(Modifier.height(6.dp))
                     when {
-                        item.translated != null -> Text(item.translated, color = Color.White, fontSize = 15.5.sp, lineHeight = 22.sp)
-                        item.failed -> Text("Chưa dịch được đoạn này", color = C.Warn, fontSize = 13.sp)
-                        else -> Text("…", color = C.Muted, fontSize = 15.sp)
+                        pick?.translated != null -> SelectionContainer {
+                            Text(pick.translated, color = Color.White.copy(alpha = if (vm.pickBusy) .5f else 1f), fontSize = 16.sp, lineHeight = 23.sp)
+                        }
+                        vm.pickBusy -> CircularProgressIndicator(color = C.Red, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
                     }
                 }
+                Row(Modifier.fillMaxWidth().padding(bottom = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                    EngineChip(vm.pickEngine)
+                    TextButton(onClick = vm::clearPick) { Text("Bỏ chọn", color = C.Muted, fontSize = 13.sp) }
+                    Spacer(Modifier.weight(1f))
+                    if (vm.pickEngine != Engine.CLAUDE) ClaudeButton(vm)
+                }
             }
-        }
-        Row(Modifier.fillMaxWidth().padding(bottom = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-            EngineChip(vm.camEngine)
-            Spacer(Modifier.weight(1f))
-            if (!vm.alwaysOffline && vm.camEngine != Engine.CLAUDE && vm.photo != null) {
-                TextButton(onClick = {
-                    if (vm.hasKey) vm.claudeImage() else vm.updateMsg = "Nhập API key trong Cài đặt để dịch với Claude"
-                }) { Text("Dịch với Claude", color = C.RedSoft, fontWeight = FontWeight.SemiBold, fontSize = 13.sp) }
+            vm.showAll -> {
+                LazyColumn(Modifier.weight(1f), state = list, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    itemsIndexed(vm.items) { i, item ->
+                        val sel = i == vm.selected
+                        Column(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                                .background(if (sel) C.SelectedBg else C.Panel)
+                                .border(1.dp, if (sel) C.Red else C.Line, RoundedCornerShape(12.dp))
+                                .clickable { vm.selected = if (sel) -1 else i }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                        ) {
+                            Text(item.original, color = C.Muted, fontSize = 12.5.sp, maxLines = if (sel) 20 else 3, overflow = TextOverflow.Ellipsis)
+                            Spacer(Modifier.height(2.dp))
+                            when {
+                                item.translated != null -> Text(item.translated, color = Color.White, fontSize = 15.5.sp, lineHeight = 22.sp)
+                                item.failed -> Text("Chưa dịch được đoạn này", color = C.Warn, fontSize = 13.sp)
+                                else -> Text("…", color = C.Muted, fontSize = 15.sp)
+                            }
+                        }
+                    }
+                }
+                Row(Modifier.fillMaxWidth().padding(bottom = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                    EngineChip(vm.camEngine)
+                    Spacer(Modifier.weight(1f))
+                    if (vm.camEngine != Engine.CLAUDE) ClaudeButton(vm)
+                }
+            }
+            else -> {
+                // Nothing picked yet: explain how to pick
+                Column(
+                    Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(C.Panel)
+                        .border(1.dp, C.Line, RoundedCornerShape(12.dp)).padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    if (vm.items.isEmpty()) {
+                        Text(if (vm.camBusy) "Đang đọc chữ trong ảnh…" else "Chưa thấy chữ nào.", color = C.Muted, fontSize = 14.sp)
+                    } else {
+                        Text("Kéo ngón tay trên ảnh để khoanh vùng chữ cần dịch", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Hoặc chạm vào từng khung đỏ để chọn / bỏ chọn. Các đoạn đã chọn được dịch chung thành 1 đoạn.", color = C.Muted, fontSize = 13.sp)
+                        Button(
+                            onClick = vm::translateAll,
+                            colors = ButtonDefaults.buttonColors(containerColor = C.Red), shape = RoundedCornerShape(9.dp),
+                        ) { Text("Dịch tất cả (${vm.items.size} đoạn)") }
+                    }
+                }
+                Row(Modifier.fillMaxWidth().padding(bottom = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Spacer(Modifier.weight(1f))
+                    ClaudeButton(vm, if (vm.items.isEmpty()) "Dịch với Claude" else "Dịch tất cả với Claude")
+                }
             }
         }
     }
