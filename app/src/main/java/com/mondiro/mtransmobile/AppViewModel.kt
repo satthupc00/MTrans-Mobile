@@ -108,6 +108,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var checking by mutableStateOf(false)
         private set
     var updateMsg by mutableStateOf<String?>(null)
+    /** Download progress of a new version (0..1), null when not downloading. */
+    var downloadProgress by mutableStateOf<Float?>(null)
+        private set
 
     val claudeReady get() = hasKey && !alwaysOffline && online
 
@@ -524,13 +527,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun installUpdate(context: Context) {
         val url = update?.url ?: return
+        if (downloadProgress != null) return
         viewModelScope.launch {
+            downloadProgress = 0f
             try {
-                updateMsg = "Đang tải bản mới…"
-                val started = Updater.install(context, url)
+                val started = Updater.install(context, url) { p ->
+                    viewModelScope.launch { downloadProgress = p }
+                }
                 updateMsg = if (started) null else "Cho phép MTrans cài ứng dụng, rồi bấm Cập nhật lại"
             } catch (e: Exception) {
-                updateMsg = e.message
+                updateMsg = e.message ?: "Tải bản mới lỗi, thử lại"
+            } finally {
+                downloadProgress = null
             }
         }
     }

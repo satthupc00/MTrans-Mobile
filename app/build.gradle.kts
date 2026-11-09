@@ -12,8 +12,12 @@ android {
         applicationId = "com.mondiro.mtransmobile"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 3
+        versionName = "1.0.2"
+        // Z Fold 7 and all recent phones are 64-bit ARM: ship only that to halve the APK size.
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
     // CI passes the release keystore through environment variables (GitHub Secrets).

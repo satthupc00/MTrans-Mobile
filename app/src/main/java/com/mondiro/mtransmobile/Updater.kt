@@ -56,7 +56,7 @@ object Updater {
     }
 
     /** Download the APK and open the system installer. Returns false if install permission is needed first. */
-    suspend fun install(context: Context, url: String): Boolean {
+    suspend fun install(context: Context, url: String, onProgress: (Float) -> Unit = {}): Boolean {
         if (!url.startsWith("https://github.com/satthupc00/MTrans-Mobile/")) throw TranslateException("Đường dẫn cập nhật không hợp lệ")
         if (Build.VERSION.SDK_INT >= 26 && !context.packageManager.canRequestPackageInstalls()) {
             val i = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
@@ -71,7 +71,28 @@ object Updater {
             GoogleTranslate.http.newBuilder().readTimeout(120, java.util.concurrent.TimeUnit.SECONDS).build()
                 .newCall(req).execute().use { resp ->
                     if (!resp.isSuccessful) throw TranslateException("Tải bản cập nhật lỗi ${resp.code}")
-                    resp.body!!.byteStream().use { input -> f.outputStream().use { input.copyTo(it) } }
+                    val body = resp.body!!
+                    val total = body.contentLength().toFloat()
+                    var done = 0L
+                    var last = -1
+                    body.byteStream().use { input ->
+                        f.outputStream().use { out ->
+                            val buf = ByteArray(64 * 1024)
+                            while (true) {
+                                val n = input.read(buf)
+                                if (n < 0) break
+                                out.write(buf, 0, n)
+                                done += n
+                                if (total > 0) {
+                                    val pct = (done * 100 / total).toInt()
+                                    if (pct != last) {
+                                        last = pct
+                                        onProgress(done / total)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             f
         }

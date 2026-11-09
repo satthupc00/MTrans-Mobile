@@ -1,13 +1,13 @@
 {
-  "version": "1.0.1",
+  "version": "1.0.2",
   "date": "2026-11-10",
-  "new": [
-    "Kiểu Danh sách: kéo ngón tay trên ảnh để khoanh vùng chữ cần dịch, hoặc chạm từng khung để chọn / bỏ chọn",
-    "Các đoạn đã chọn được dịch chung thành 1 đoạn liền mạch; vẫn có nút \"Dịch tất cả\"",
-    "Kiểu Đè lên ảnh có nút \"Dịch với Claude\": Claude dịch từng đoạn và đè đúng chỗ chữ gốc"
-  ],
+  "new": [],
   "improved": [
-    "Claude nhìn cả ảnh để sửa chữ máy đọc sai trước khi dịch"
+    "Khi cập nhật, hiện phần trăm tải và thanh tiến độ",
+    "File cài nhẹ còn khoảng một nửa, cập nhật nhanh hơn"
   ],
-  "fixed": []
+  "fixed": [
+    "Bấm Cập nhật không còn trông như không có gì xảy ra",
+    "Chữ gợi ý trong ô API key không bị xuống dòng"
+  ]
 }

@@ -111,7 +111,15 @@ fun SettingsScreen(vm: AppViewModel) {
                 }
             }
             val u = vm.update
-            if (u?.hasUpdate == true) {
+            val dl = vm.downloadProgress
+            if (dl != null) {
+                Column(Modifier.padding(top = 10.dp)) {
+                    Text("Đang tải bản mới… ${(dl * 100).toInt()}%", color = C.Green, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(6.dp))
+                    LinearProgressIndicator(progress = { dl }, color = C.Green, trackColor = Color(0xFF3A3E46), modifier = Modifier.fillMaxWidth().height(4.dp))
+                    Hint("Tải xong, Android sẽ hiện màn hình cài đặt.")
+                }
+            } else if (u?.hasUpdate == true) {
                 Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Có bản mới v${u.latest}", color = C.Green, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                     Button(onClick = { vm.installUpdate(ctx) }, colors = ButtonDefaults.buttonColors(containerColor = C.Red)) { Text("Cập nhật") }
@@ -180,7 +188,12 @@ private fun KeyField(vm: AppViewModel) {
             visualTransformation = if (show) VisualTransformation.None else PasswordVisualTransformation(),
             modifier = Modifier.weight(1f),
             decorationBox = { inner ->
-                if (key.isEmpty()) Text(if (vm.hasKey) "Đã lưu key · dán key mới để thay" else "Dán API key để dùng \"Dịch với Claude\"", color = C.Dim, fontSize = 14.sp)
+                if (key.isEmpty()) {
+                    Text(
+                        if (vm.hasKey) "Đã lưu · dán key mới để thay" else "Dán Claude API key",
+                        color = C.Dim, fontSize = 14.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    )
+                }
                 inner()
             },
         )

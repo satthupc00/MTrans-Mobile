@@ -76,7 +76,13 @@ fun TopRow(vm: AppViewModel) {
         Spacer(Modifier.weight(1f))
         val u = vm.update
         if (u != null && !u.hasUpdate) LatestBadge()
-        if (u != null && u.hasUpdate) {
+        val dl = vm.downloadProgress
+        if (dl != null) {
+            Text(
+                "Đang tải ${(dl * 100).toInt()}%", color = C.Green, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(end = 2.dp),
+            )
+        } else if (u != null && u.hasUpdate) {
             Text(
                 "v${u.latest}", color = C.Green, fontSize = 11.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(end = 2.dp),
@@ -93,7 +99,7 @@ fun TopRow(vm: AppViewModel) {
                 Icons.Filled.Refresh, contentDescription = "Kiểm tra cập nhật",
                 tint = if (u != null) C.Green else C.Muted,
                 modifier = Modifier.size(21.dp)
-                    .then(if (vm.checking) Modifier.rotate(angle) else Modifier)
+                    .then(if (vm.checking || vm.downloadProgress != null) Modifier.rotate(angle) else Modifier)
                     .then(if (u?.hasUpdate == true) Modifier.scale(pulse) else Modifier),
             )
         }
