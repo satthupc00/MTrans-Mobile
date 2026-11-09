@@ -10,3 +10,14 @@
 -keep class com.anthropic.** { *; }
 -keep class com.fasterxml.jackson.** { *; }
 -keepattributes Signature,InnerClasses,EnclosingMethod,*Annotation*
+# Claude SDK structured-output helpers reference JVM-only reflection types (not used here).
+-dontwarn java.lang.reflect.AnnotatedType
+-dontwarn java.lang.reflect.AnnotatedParameterizedType
+-dontwarn java.lang.reflect.AnnotatedArrayType
+-dontwarn java.lang.reflect.AnnotatedWildcardType
+-dontwarn java.lang.reflect.AnnotatedTypeVariable
+-dontwarn com.github.victools.**
+-dontwarn com.fasterxml.jackson.databind.ext.**
+-dontwarn kotlinx.coroutines.debug.**
+-dontwarn javax.lang.model.**
+-dontwarn org.jetbrains.annotations.**
