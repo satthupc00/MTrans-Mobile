@@ -1,0 +1,12 @@
+# ML Kit and the Claude SDK ship their own consumer rules.
+-dontwarn org.slf4j.**
+-dontwarn org.conscrypt.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.openjsse.**
+-dontwarn javax.annotation.**
+-dontwarn com.google.errorprone.annotations.**
+-dontwarn java.beans.**
+-dontwarn kotlin.reflect.jvm.internal.**
+-keep class com.anthropic.** { *; }
+-keep class com.fasterxml.jackson.** { *; }
+-keepattributes Signature,InnerClasses,EnclosingMethod,*Annotation*
